@@ -1,19 +1,37 @@
-import { MongoClient } from "mongodb";
+import { MongoClient } from 'mongodb';
+
+const uri = process.env.MONGODB_URI;
 const options = {};
-let globalClientPromise;
-export function getClientPromise() {
- const uri = process.env.MONGODB_URI;
- if (!uri) {
- throw new Error("Please add your Mongo URI to .env.local or set MONGODB_URIenv variable");
- }
- if (process.env.NODE_ENV === "development") {
- if (!globalClientPromise) {
- const client = new MongoClient(uri, options);
- globalClientPromise = client.connect();
- }
- return globalClientPromise;
- } else { 
-  const client = new MongoClient(uri, options);
- return client.connect();
- }
-} 
+
+let client;
+let clientPromise;
+
+if (!process.env.MONGODB_URI) {
+  throw new Error('Please add MONGODB_URI to .env.local');
+}
+
+if (process.env.NODE_ENV === 'development') {
+  // In development, use a global variable
+  if (!global._mongoClientPromise) {
+    client = new MongoClient(uri, options);
+    global._mongoClientPromise = client.connect();
+  }
+  clientPromise = global._mongoClientPromise;
+} else {
+  // In production, create new connection
+  client = new MongoClient(uri, options);
+  clientPromise = client.connect();
+}
+
+export async function getClientPromise() {
+  try {
+    const client = await clientPromise;
+    // Test connection
+    await client.db().admin().ping();
+    console.log('✅ MongoDB connected successfully');
+    return client;
+  } catch (error) {
+    console.error('❌ MongoDB connection failed:', error);
+    throw error;
+  }
+}
