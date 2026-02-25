@@ -1,196 +1,54 @@
-// src/app/api/item/route.js - UPDATED WITH CORS
+import corsHeaders from "@/lib/cors";
 import { getClientPromise } from "@/lib/mongodb";
 import { NextResponse } from "next/server";
 
-// Helper function for CORS headers
-function getCorsHeaders(origin) {
-  const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173'
-  ];
-  
-  const isAllowedOrigin = allowedOrigins.includes(origin);
-  
-  return {
-    'Access-Control-Allow-Origin': isAllowedOrigin ? origin : allowedOrigins[0],
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
-    'Access-Control-Allow-Credentials': 'true',
-  };
+const cacheHeaders = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+  "Pragma": "no-cache",
+  "Expires": "0",
+  ...corsHeaders
+};
+
+export async function OPTIONS() {
+  return new Response(null, { status: 200, headers: corsHeaders });
 }
 
-// GET all items
-export async function GET(request) {
+export async function GET(req) {
   try {
-    const origin = request.headers.get('origin') || 'http://localhost:3000';
-    const headers = getCorsHeaders(origin);
-    
+    const { searchParams } = new URL(req.url);
+    const page = parseInt(searchParams.get("page")) || 1;
+    const limit = parseInt(searchParams.get("limit")) || 5;
+    const skip = (page - 1) * limit;
+
     const client = await getClientPromise();
     const db = client.db("wad-01");
     
-    const items = await db.collection("item")
-      .find({})
-      .sort({ createdAt: -1 })
-      .toArray();
+    const items = await db.collection("item").find({}).skip(skip).limit(limit).toArray();
+    const total = await db.collection("item").countDocuments();
 
     return NextResponse.json({
-      success: true,
-      items: items || []
-    }, { 
-      headers 
-    });
-
-  } catch (error) {
-    console.error("GET Error:", error);
-    const origin = request.headers.get('origin') || 'http://localhost:3000';
-    const headers = getCorsHeaders(origin);
-    
-    return NextResponse.json(
-      { 
-        success: false,
-        message: "Failed to fetch items"
-      },
-      { status: 500, headers }
-    );
+      items,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page
+    }, { headers: cacheHeaders });
+  } catch (err) {
+    return NextResponse.json({ message: err.toString() }, { status: 400, headers: corsHeaders });
   }
 }
 
-// POST create new item
-export async function POST(request) {
+export async function POST(req) {
   try {
-    const origin = request.headers.get('origin') || 'http://localhost:3000';
-    const headers = getCorsHeaders(origin);
-    const data = await request.json();
-    
-    if (!data.name || !data.price || !data.category) {
-      return NextResponse.json(
-        { 
-          success: false,
-          message: "Name, price, and category are required" 
-        },
-        { status: 400, headers }
-      );
-    }
-
-    const price = parseFloat(data.price);
-    if (isNaN(price) || price < 0) {
-      return NextResponse.json(
-        { 
-          success: false,
-          message: "Price must be a positive number" 
-        },
-        { status: 400, headers }
-      );
-    }
-
+    const data = await req.json();
     const client = await getClientPromise();
     const db = client.db("wad-01");
-    
     const result = await db.collection("item").insertOne({
-      itemName: data.name.trim(),
+      itemName: data.name,
       itemCategory: data.category,
-      itemPrice: price,
+      itemPrice: data.price,
       status: "ACTIVE",
-      createdAt: new Date(),
-      updatedAt: new Date()
     });
-
-    return NextResponse.json({
-      success: true,
-      message: "Item created successfully",
-      id: result.insertedId
-    }, { 
-      status: 201, 
-      headers 
-    });
-
-  } catch (error) {
-    console.error("POST Error:", error);
-    const origin = request.headers.get('origin') || 'http://localhost:3000';
-    const headers = getCorsHeaders(origin);
-    
-    return NextResponse.json(
-      { 
-        success: false,
-        message: "Failed to create item"
-      },
-      { status: 500, headers }
-    );
+    return NextResponse.json({ id: result.insertedId }, { status: 200, headers: corsHeaders });
+  } catch (err) {
+    return NextResponse.json({ message: err.toString() }, { status: 400, headers: corsHeaders });
   }
-}
-
-// DELETE item by name
-export async function DELETE(request) {
-  try {
-    const origin = request.headers.get('origin') || 'http://localhost:3000';
-    const headers = getCorsHeaders(origin);
-    
-    const url = new URL(request.url);
-    const name = url.searchParams.get('name');
-    
-    console.log("DELETE request for item name:", name);
-    
-    if (!name || name.trim() === '') {
-      return NextResponse.json(
-        { 
-          success: false,
-          message: "Item name is required. Use ?name=itemName" 
-        },
-        { status: 400, headers }
-      );
-    }
-
-    const client = await getClientPromise();
-    const db = client.db("wad-01");
-    
-    const result = await db.collection("item").deleteOne({
-      itemName: { $regex: new RegExp(`^${name.trim()}$`, 'i') }
-    });
-
-    console.log("Delete result:", result);
-
-    if (result.deletedCount === 0) {
-      return NextResponse.json(
-        { 
-          success: false,
-          message: `Item "${name}" not found` 
-        },
-        { status: 404, headers }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: `Item "${name}" deleted successfully`,
-      deletedCount: result.deletedCount
-    }, { 
-      status: 200, 
-      headers 
-    });
-
-  } catch (error) {
-    console.error("DELETE Error:", error);
-    const origin = request.headers.get('origin') || 'http://localhost:3000';
-    const headers = getCorsHeaders(origin);
-    
-    return NextResponse.json(
-      { 
-        success: false,
-        message: "Failed to delete item"
-      },
-      { status: 500, headers }
-    );
-  }
-}
-
-// Handle OPTIONS for CORS
-export async function OPTIONS(request) {
-  const origin = request.headers.get('origin') || 'http://localhost:3000';
-  const headers = getCorsHeaders(origin);
-  
-  return new Response(null, {
-    status: 200,
-    headers,
-  });
 }
